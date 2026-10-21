@@ -14,18 +14,32 @@ import android.widget.ScrollView
 import android.widget.TextView
 import java.util.Locale
 
-class MainActivity : Activity(), TextToSpeech.OnInitListener {
+class MainActivity : Activity() {
 
     private lateinit var conversation: TextView
     private lateinit var input: EditText
     private var speaker: TextToSpeech? = null
+    private var speakerReady = false
+
     private val requestSpeech = 1001
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        speaker = TextToSpeech(this, this)
+        try {
+            createInterface()
+            initializeSpeaker()
+        } catch (e: Exception) {
+            android.util.Log.e(
+                "SadiqAssistant",
+                "Startup error",
+                e
+            )
+            throw e
+        }
+    }
 
+    private fun createInterface() {
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(24, 24, 24, 24)
@@ -47,10 +61,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
         val scroll = ScrollView(this)
         scroll.addView(conversation)
+
         layout.addView(
             scroll,
             LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                0,
+                1f
             )
         )
 
@@ -64,9 +81,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             text = "إرسال"
             setOnClickListener {
                 val message = input.text.toString().trim()
+
                 if (message.isNotEmpty()) {
                     conversation.append("\n\nأنت: $message")
-                    conversation.append("\nصديقي: استلمت رسالتك، وسنطوّر ذكائي لاحقاً.")
+                    conversation.append(
+                        "\nصديقي: استلمت رسالتك، وسنطوّر ذكائي لاحقاً."
+                    )
                     input.text.clear()
                 }
             }
@@ -75,19 +95,34 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
         val listen = Button(this).apply {
             text = "تحدث معي"
-            setOnClickListener { startListening() }
+            setOnClickListener {
+                startListening()
+            }
         }
         layout.addView(listen)
 
         val speak = Button(this).apply {
             text = "اقرأ الرد بصوت"
             setOnClickListener {
-                speaker?.speak(
-                    conversation.text.toString(),
-                    TextToSpeech.QUEUE_FLUSH,
-                    null,
-                    "sadiq_reply"
-                )
+                if (speakerReady) {
+                    try {
+                        speaker?.speak(
+                            conversation.text.toString(),
+                            TextToSpeech.QUEUE_FLUSH,
+                            null,
+                            "sadiq_reply"
+                        )
+                    } catch (e: Exception) {
+                        showMessage("تعذر تشغيل الصوت.")
+                        android.util.Log.e(
+                            "SadiqAssistant",
+                            "Speech error",
+                            e
+                        )
+                    }
+                } else {
+                    showMessage("الصوت غير جاهز بعد.")
+                }
             }
         }
         layout.addView(speak)
@@ -95,18 +130,75 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         setContentView(layout)
     }
 
+    private fun initializeSpeaker() {
+        try {
+            speaker = TextToSpeech(this) { status ->
+                if (status == TextToSpeech.SUCCESS) {
+                    try {
+                        val result = speaker?.setLanguage(
+                            Locale("ar")
+                        )
+                        speakerReady =
+                            result != null &&
+                            result != TextToSpeech.LANG_MISSING_DATA &&
+                            result != TextToSpeech.LANG_NOT_SUPPORTED
+
+                        if (!speakerReady) {
+                            showMessage(
+                                "حزمة الصوت العربي غير متاحة."
+                            )
+                        }
+                    } catch (e: Exception) {
+                        speakerReady = false
+                        android.util.Log.e(
+                            "SadiqAssistant",
+                            "Language initialization error",
+                            e
+                        )
+                    }
+                } else {
+                    speakerReady = false
+                    showMessage("تعذر تهيئة الصوت.")
+                }
+            }
+        } catch (e: Exception) {
+            speakerReady = false
+            android.util.Log.e(
+                "SadiqAssistant",
+                "TextToSpeech initialization error",
+                e
+            )
+            showMessage("تعذر تشغيل خدمة الصوت.")
+        }
+    }
+
     private fun startListening() {
         try {
-            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
-            intent.putExtra(
-                RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
-            )
-            intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ar")
-            intent.putExtra(RecognizerIntent.EXTRA_PROMPT, "تحدث إلى صديقي")
+            val intent = Intent(
+                RecognizerIntent.ACTION_RECOGNIZE_SPEECH
+            ).apply {
+                putExtra(
+                    RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                    RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+                )
+                putExtra(
+                    RecognizerIntent.EXTRA_LANGUAGE,
+                    "ar"
+                )
+                putExtra(
+                    RecognizerIntent.EXTRA_PROMPT,
+                    "تحدث إلى صديقي"
+                )
+            }
+
             startActivityForResult(intent, requestSpeech)
         } catch (e: Exception) {
-            conversation.append("\n\nتعذر تشغيل التعرف على الصوت.")
+            showMessage("تعذر تشغيل التعرف على الصوت.")
+            android.util.Log.e(
+                "SadiqAssistant",
+                "Speech recognition error",
+                e
+            )
         }
     }
 
@@ -116,13 +208,22 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         resultCode: Int,
         data: Intent?
     ) {
-        super.onActivityResult(requestCode, resultCode, data)
+        super.onActivityResult(
+            requestCode,
+            resultCode,
+            data
+        )
 
-        if (requestCode == requestSpeech && resultCode == RESULT_OK) {
-            val results = data?.getStringArrayListExtra(
-                RecognizerIntent.EXTRA_RESULTS
-            )
-            val message = results?.firstOrNull().orEmpty()
+        if (
+            requestCode == requestSpeech &&
+            resultCode == RESULT_OK
+        ) {
+            val message = data
+                ?.getStringArrayListExtra(
+                    RecognizerIntent.EXTRA_RESULTS
+                )
+                ?.firstOrNull()
+                .orEmpty()
 
             if (message.isNotBlank()) {
                 input.setText(message)
@@ -131,15 +232,26 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
     }
 
-    override fun onInit(status: Int) {
-        if (status == TextToSpeech.SUCCESS) {
-            speaker?.language = Locale("ar")
+    private fun showMessage(message: String) {
+        if (::conversation.isInitialized) {
+            conversation.append("\n\n$message")
         }
     }
 
     override fun onDestroy() {
-        speaker?.stop()
-        speaker?.shutdown()
+        try {
+            speaker?.stop()
+            speaker?.shutdown()
+        } catch (e: Exception) {
+            android.util.Log.e(
+                "SadiqAssistant",
+                "Audio shutdown error",
+                e
+            )
+        }
+
+        speaker = null
+        speakerReady = false
         super.onDestroy()
     }
 }
