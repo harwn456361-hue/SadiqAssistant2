@@ -1,3 +1,4 @@
+
 name: Build SadiqAssistant2 APK
 
 on:
@@ -20,10 +21,11 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
       - name: Build APK
-        run: |
-          chmod +x gradlew
-          ./gradlew assembleDebug
+        run: gradle --version && gradle -p app assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
